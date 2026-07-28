@@ -1,0 +1,13 @@
+{
+  "name": "kasir-warung-web",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Aplikasi kasir warung yang bisa diakses lewat internet, data tersimpan permanen",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
