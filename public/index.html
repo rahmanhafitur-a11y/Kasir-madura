@@ -12,6 +12,24 @@
 </head>
 <body class="bg-[#F1F4EC]">
 <div id="root"></div>
+<script>
+  window.onerror = function(msg, url, line, col, error) {
+    document.getElementById("root").innerHTML =
+      '<div style="padding:20px;font-family:monospace;color:#7A2E3B;background:#fff;white-space:pre-wrap;word-break:break-word;">' +
+      '<b>Ada error:</b><br>' + msg + '<br>Baris: ' + line + '<br>' +
+      (error && error.stack ? error.stack : '') +
+      '</div>';
+  };
+  setTimeout(function() {
+    var root = document.getElementById("root");
+    if (root && root.innerHTML.trim() === "") {
+      root.innerHTML =
+        '<div style="padding:20px;font-family:monospace;color:#1F4B3E;background:#fff;">' +
+        'Halaman kelamaan memuat atau ada script yang gagal diambil. Coba refresh, atau kirim screenshot ini ke Claude.' +
+        '</div>';
+    }
+  }, 8000);
+</script>
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
