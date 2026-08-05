@@ -1,4 +1,5 @@
 import express from "express";
+import session from "express-session";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -6,9 +7,49 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = path.join(__dirname, "data.json");
 
+// ---- kredensial login (bisa diganti lewat Environment Variables di Railway) ----
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "warung123";
+const SESSION_SECRET = process.env.SESSION_SECRET || "ganti-secret-ini-lewat-railway";
+
 const app = express();
+app.set("trust proxy", 1); // perlu karena Railway jalan di belakang proxy
 app.use(express.json());
+app.use(
+  session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7, sameSite: "lax" }, // sesi login 7 hari
+  })
+);
 app.use(express.static(path.join(__dirname, "public")));
+
+// ---- middleware: cek apakah sudah login sebelum akses data ----
+function requireLogin(req, res, next) {
+  if (req.session && req.session.loggedIn) return next();
+  return res.status(401).json({ error: "Belum login" });
+}
+
+// ---- cek status login (dipakai frontend saat halaman dibuka) ----
+app.get("/api/session", (req, res) => {
+  res.json({ loggedIn: !!(req.session && req.session.loggedIn) });
+});
+
+// ---- login ----
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    req.session.loggedIn = true;
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ error: "Username atau password salah" });
+});
+
+// ---- logout ----
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
 
 const DEFAULT_PRODUCTS = [
   { id: "p1", name: "Sampoerna Mild", category: "Rokok", price: 30000, stock: 20 },
@@ -45,13 +86,13 @@ async function writeData(data) {
 }
 
 // ---- ambil semua data (produk + riwayat transaksi) ----
-app.get("/api/data", async (req, res) => {
+app.get("/api/data", requireLogin, async (req, res) => {
   const data = await readData();
   res.json(data);
 });
 
 // ---- produk: tambah ----
-app.post("/api/products", async (req, res) => {
+app.post("/api/products", requireLogin, async (req, res) => {
   const data = await readData();
   const newProduct = { id: `p_${Date.now()}`, stock: 0, ...req.body };
   data.products.push(newProduct);
@@ -60,7 +101,7 @@ app.post("/api/products", async (req, res) => {
 });
 
 // ---- produk: ubah ----
-app.put("/api/products/:id", async (req, res) => {
+app.put("/api/products/:id", requireLogin, async (req, res) => {
   const data = await readData();
   data.products = data.products.map((p) =>
     p.id === req.params.id ? { ...p, ...req.body } : p
@@ -70,7 +111,7 @@ app.put("/api/products/:id", async (req, res) => {
 });
 
 // ---- produk: hapus ----
-app.delete("/api/products/:id", async (req, res) => {
+app.delete("/api/products/:id", requireLogin, async (req, res) => {
   const data = await readData();
   data.products = data.products.filter((p) => p.id !== req.params.id);
   await writeData(data);
@@ -78,7 +119,7 @@ app.delete("/api/products/:id", async (req, res) => {
 });
 
 // ---- transaksi: checkout (simpan penjualan baru) ----
-app.post("/api/transactions", async (req, res) => {
+app.post("/api/transactions", requireLogin, async (req, res) => {
   const data = await readData();
   const items = req.body.items || [];
 
@@ -109,7 +150,7 @@ app.post("/api/transactions", async (req, res) => {
 });
 
 // ---- transaksi: hapus (untuk koreksi kesalahan input) ----
-app.delete("/api/transactions/:id", async (req, res) => {
+app.delete("/api/transactions/:id", requireLogin, async (req, res) => {
   const data = await readData();
   const trx = data.transactions.find((t) => t.id === req.params.id);
 
