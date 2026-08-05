@@ -11,21 +11,21 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const DEFAULT_PRODUCTS = [
-  { id: "p1", name: "Sampoerna Mild", category: "Rokok", price: 30000 },
-  { id: "p2", name: "Gudang Garam Filter", category: "Rokok", price: 25000 },
-  { id: "p3", name: "Djarum Super", category: "Rokok", price: 27000 },
-  { id: "p4", name: "Air Mineral 600ml", category: "Minuman", price: 4000 },
-  { id: "p5", name: "Teh Botol", category: "Minuman", price: 5000 },
-  { id: "p6", name: "Kopi Sachet", category: "Minuman", price: 2000 },
-  { id: "p7", name: "Indomie Goreng", category: "Snack", price: 3500 },
-  { id: "p8", name: "Chitato", category: "Snack", price: 11000 },
-  { id: "p9", name: "Beras 1kg", category: "Sembako", price: 14000 },
-  { id: "p10", name: "Minyak Goreng 1L", category: "Sembako", price: 18000 },
-  { id: "p11", name: "Telur 1kg", category: "Sembako", price: 28000 },
-  { id: "p12", name: "Gula 1kg", category: "Sembako", price: 16000 },
-  { id: "p13", name: "Pulsa 10rb", category: "Pulsa/Token", price: 11000 },
-  { id: "p14", name: "Token Listrik 20rb", category: "Pulsa/Token", price: 21000 },
-  { id: "p15", name: "Gas LPG 3kg", category: "Lainnya", price: 22000 },
+  { id: "p1", name: "Sampoerna Mild", category: "Rokok", price: 30000, stock: 20 },
+  { id: "p2", name: "Gudang Garam Filter", category: "Rokok", price: 25000, stock: 20 },
+  { id: "p3", name: "Djarum Super", category: "Rokok", price: 27000, stock: 20 },
+  { id: "p4", name: "Air Mineral 600ml", category: "Minuman", price: 4000, stock: 30 },
+  { id: "p5", name: "Teh Botol", category: "Minuman", price: 5000, stock: 30 },
+  { id: "p6", name: "Kopi Sachet", category: "Minuman", price: 2000, stock: 30 },
+  { id: "p7", name: "Indomie Goreng", category: "Snack", price: 3500, stock: 30 },
+  { id: "p8", name: "Chitato", category: "Snack", price: 11000, stock: 20 },
+  { id: "p9", name: "Beras 1kg", category: "Sembako", price: 14000, stock: 15 },
+  { id: "p10", name: "Minyak Goreng 1L", category: "Sembako", price: 18000, stock: 15 },
+  { id: "p11", name: "Telur 1kg", category: "Sembako", price: 28000, stock: 15 },
+  { id: "p12", name: "Gula 1kg", category: "Sembako", price: 16000, stock: 15 },
+  { id: "p13", name: "Pulsa 10rb", category: "Pulsa/Token", price: 11000, stock: 50 },
+  { id: "p14", name: "Token Listrik 20rb", category: "Pulsa/Token", price: 21000, stock: 50 },
+  { id: "p15", name: "Gas LPG 3kg", category: "Lainnya", price: 22000, stock: 10 },
 ];
 
 // ---- baca / tulis data.json (ini "gudang penyimpanan" datanya) ----
@@ -53,7 +53,7 @@ app.get("/api/data", async (req, res) => {
 // ---- produk: tambah ----
 app.post("/api/products", async (req, res) => {
   const data = await readData();
-  const newProduct = { id: `p_${Date.now()}`, ...req.body };
+  const newProduct = { id: `p_${Date.now()}`, stock: 0, ...req.body };
   data.products.push(newProduct);
   await writeData(data);
   res.json(newProduct);
@@ -80,10 +80,27 @@ app.delete("/api/products/:id", async (req, res) => {
 // ---- transaksi: checkout (simpan penjualan baru) ----
 app.post("/api/transactions", async (req, res) => {
   const data = await readData();
+  const items = req.body.items || [];
+
+  // cek dulu stok masing-masing item cukup atau tidak, sebelum ada yang disimpan
+  for (const item of items) {
+    const product = data.products.find((p) => p.id === item.id);
+    const stokTersedia = product ? (product.stock ?? 0) : 0;
+    if (!product || stokTersedia < item.qty) {
+      return res.status(400).json({ error: `Stok "${item.name}" tidak cukup (sisa ${stokTersedia})` });
+    }
+  }
+
+  // stok cukup semua, kurangi stok tiap produk yang terjual
+  items.forEach((item) => {
+    const product = data.products.find((p) => p.id === item.id);
+    product.stock = (product.stock ?? 0) - item.qty;
+  });
+
   const trx = {
     id: `t_${Date.now()}`,
     timestamp: new Date().toISOString(),
-    items: req.body.items,
+    items,
     total: req.body.total,
   };
   data.transactions.unshift(trx);
@@ -94,6 +111,16 @@ app.post("/api/transactions", async (req, res) => {
 // ---- transaksi: hapus (untuk koreksi kesalahan input) ----
 app.delete("/api/transactions/:id", async (req, res) => {
   const data = await readData();
+  const trx = data.transactions.find((t) => t.id === req.params.id);
+
+  // kembalikan stok produk yang ada di transaksi yang dihapus
+  if (trx) {
+    trx.items.forEach((item) => {
+      const product = data.products.find((p) => p.id === item.id);
+      if (product) product.stock = (product.stock ?? 0) + item.qty;
+    });
+  }
+
   data.transactions = data.transactions.filter((t) => t.id !== req.params.id);
   await writeData(data);
   res.json({ ok: true });
