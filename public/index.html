@@ -56,7 +56,69 @@ async function api(path, options) {
   return res.json();
 }
 
+function Login({ onLoggedIn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Login gagal");
+      }
+      onLoggedIn();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white border border-[#D9D4C0] rounded-lg p-6 w-full max-w-sm space-y-3">
+        <div className="text-center mb-2">
+          <div className="text-3xl mb-1">🏪</div>
+          <div className="font-bold text-lg text-[#1F4B3E]">Kasir Warung</div>
+          <div className="text-sm text-[#6B7A70]">Silakan login untuk melanjutkan</div>
+        </div>
+        {error && <div className="text-sm text-[#7A2E3B] bg-[#7A2E3B]/10 rounded-md px-3 py-2">{error}</div>}
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Username"
+          autoCapitalize="none"
+          className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm"
+        />
+        <button type="submit" disabled={loading} className="w-full bg-[#1F4B3E] text-white font-semibold py-2 rounded-md disabled:opacity-50">
+          {loading ? "Memproses..." : "Login"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function App() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
   const [products, setProducts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,13 +130,39 @@ function App() {
   const [reportRange, setReportRange] = useState("hari");
 
   const loadAll = async () => {
-    const data = await api("/data");
-    setProducts(data.products);
-    setTransactions(data.transactions);
-    setLoading(false);
+    try {
+      const data = await api("/data");
+      setProducts(data.products);
+      setTransactions(data.transactions);
+    } catch (err) {
+      if ((err.message || "").toLowerCase().includes("login")) setLoggedIn(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  const checkSession = async () => {
+    try {
+      const res = await fetch("/api/session", { credentials: "same-origin" });
+      const data = await res.json();
+      setLoggedIn(!!data.loggedIn);
+    } catch {
+      setLoggedIn(false);
+    } finally {
+      setAuthChecked(true);
+    }
+  };
+
+  useEffect(() => { checkSession(); }, []);
+  useEffect(() => { if (loggedIn) { setLoading(true); loadAll(); } }, [loggedIn]);
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+    setLoggedIn(false);
+    setProducts([]);
+    setTransactions([]);
+    setCart([]);
+  };
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 1800); };
 
@@ -144,6 +232,14 @@ function App() {
     return result;
   }, [products, category, search]);
 
+  if (!authChecked) {
+    return <div className="min-h-screen flex items-center justify-center text-[#1F4B3E]">Memuat...</div>;
+  }
+
+  if (!loggedIn) {
+    return <Login onLoggedIn={() => setLoggedIn(true)} />;
+  }
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-[#1F4B3E]">Memuat...</div>;
   }
@@ -157,6 +253,7 @@ function App() {
           <TabBtn active={tab === "produk"} onClick={() => setTab("produk")} label="📦 Produk" />
           <TabBtn active={tab === "laporan"} onClick={() => setTab("laporan")} label="📊 Laporan" />
         </nav>
+        <button onClick={logout} className="text-sm text-[#F1F4EC]/70 hover:text-[#F1F4EC] ml-2">Keluar</button>
       </header>
 
       {toast && (
