@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kasir Warung</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<link rel="icon" href="data:,">
+</head>
+<body class="bg-[#F1F4EC]">
+<div id="root"></div>
+<script>
+  window.onerror = function(msg, url, line, col, error) {
+    document.getElementById("root").innerHTML =
+      '<div style="padding:20px;font-family:monospace;color:#7A2E3B;background:#fff;white-space:pre-wrap;word-break:break-word;">' +
+      '<b>Ada error:</b><br>' + msg + '<br>Baris: ' + line + '<br>' +
+      (error && error.stack ? error.stack : '') +
+      '</div>';
+  };
+  setTimeout(function() {
+    var root = document.getElementById("root");
+    if (root && root.innerHTML.trim() === "") {
+      root.innerHTML =
+        '<div style="padding:20px;font-family:monospace;color:#1F4B3E;background:#fff;">' +
+        'Halaman kelamaan memuat atau ada script yang gagal diambil. Coba refresh, atau kirim screenshot ini ke Claude.' +
+        '</div>';
+    }
+  }, 8000);
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+const rupiah = (n) =>
+  new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
+
+const CATEGORIES = ["Semua", "Rokok", "Minuman", "Snack", "Sembako", "Pulsa/Token", "Lainnya"];
+const CAT_ICON = { Rokok: "🚬", Minuman: "🥤", Snack: "🍪", Sembako: "🌾", "Pulsa/Token": "📱", Lainnya: "🔥" };
+
+async function api(path, options) {
+  const res = await fetch("/api" + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    let msg = "Request gagal";
+    try {
+      const err = await res.json();
+      if (err.error) msg = err.error;
+    } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function Login({ onLoggedIn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Login gagal");
+      }
+      onLoggedIn();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white border border-[#D9D4C0] rounded-lg p-6 w-full max-w-sm space-y-3">
+        <div className="text-center mb-2">
+          <div className="text-3xl mb-1">🏪</div>
+          <div className="font-bold text-lg text-[#1F4B3E]">Kasir Warung</div>
+          <div className="text-sm text-[#6B7A70]">Silakan login untuk melanjutkan</div>
+        </div>
+        {error && <div className="text-sm text-[#7A2E3B] bg-[#7A2E3B]/10 rounded-md px-3 py-2">{error}</div>}
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Username"
+          autoCapitalize="none"
+          className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm"
+        />
+        <button type="submit" disabled={loading} className="w-full bg-[#1F4B3E] text-white font-semibold py-2 rounded-md disabled:opacity-50">
+          {loading ? "Memproses..." : "Login"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function App() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("kasir");
+  const [category, setCategory] = useState("Semua");
+  const [search, setSearch] = useState("");
+  const [cart, setCart] = useState([]);
+  const [toast, setToast] = useState("");
+  const [reportRange, setReportRange] = useState("hari");
+
+  const loadAll = async () => {
+    try {
+      const data = await api("/data");
+      setProducts(data.products);
+      setTransactions(data.transactions);
+    } catch (err) {
+      if ((err.message || "").toLowerCase().includes("login")) setLoggedIn(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkSession = async () => {
+    try {
+      const res = await fetch("/api/session", { credentials: "same-origin" });
+      const data = await res.json();
+      setLoggedIn(!!data.loggedIn);
+    } catch {
+      setLoggedIn(false);
+    } finally {
+      setAuthChecked(true);
+    }
+  };
+
+  useEffect(() => { checkSession(); }, []);
+  useEffect(() => { if (loggedIn) { setLoading(true); loadAll(); } }, [loggedIn]);
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+    setLoggedIn(false);
+    setProducts([]);
+    setTransactions([]);
+    setCart([]);
+  };
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 1800); };
+
+  const addToCart = (p) => {
+    if ((p.stock ?? 0) <= 0) { showToast("Stok habis"); return; }
+    const found = cart.find((i) => i.id === p.id);
+    if (found && found.qty + 1 > p.stock) { showToast(`Stok "${p.name}" tidak cukup`); return; }
+    setCart((c) => {
+      const f = c.find((i) => i.id === p.id);
+      if (f) return c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + 1 } : i));
+      return [...c, { id: p.id, name: p.name, price: p.price, qty: 1 }];
+    });
+  };
+  const changeQty = (id, d) => {
+    if (d > 0) {
+      const product = products.find((p) => p.id === id);
+      const item = cart.find((i) => i.id === id);
+      if (product && item && item.qty + d > product.stock) { showToast(`Stok "${product.name}" tidak cukup`); return; }
+    }
+    setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: i.qty + d } : i)).filter((i) => i.qty > 0));
+  };
+  const removeFromCart = (id) => setCart((c) => c.filter((i) => i.id !== id));
+  const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
+
+  const checkout = async () => {
+    if (cart.length === 0) return;
+    try {
+      const trx = await api("/transactions", { method: "POST", body: JSON.stringify({ items: cart, total: cartTotal }) });
+      setTransactions((t) => [trx, ...t]);
+      setCart([]);
+      await loadAll(); // refresh stok produk terbaru dari server
+      showToast("Transaksi tersimpan ✓");
+    } catch (err) {
+      showToast(err.message || "Gagal checkout");
+      await loadAll();
+    }
+  };
+
+  const addProduct = async (data) => {
+    const p = await api("/products", { method: "POST", body: JSON.stringify(data) });
+    setProducts((prev) => [...prev, p]);
+    showToast("Produk ditambahkan");
+  };
+  const updateProduct = async (id, data) => {
+    await api("/products/" + id, { method: "PUT", body: JSON.stringify(data) });
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
+    showToast("Produk diperbarui");
+  };
+  const deleteProduct = async (id) => {
+    await api("/products/" + id, { method: "DELETE" });
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    showToast("Produk dihapus");
+  };
+  const deleteTransaction = async (id) => {
+    await api("/transactions/" + id, { method: "DELETE" });
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    await loadAll(); // stok yang dikembalikan server ikut ter-refresh
+    showToast("Transaksi dihapus, stok dikembalikan");
+  };
+
+  const filteredProducts = useMemo(() => {
+    let result = category === "Semua" ? products : products.filter((p) => p.category === category);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    return result;
+  }, [products, category, search]);
+
+  if (!authChecked) {
+    return <div className="min-h-screen flex items-center justify-center text-[#1F4B3E]">Memuat...</div>;
+  }
+
+  if (!loggedIn) {
+    return <Login onLoggedIn={() => setLoggedIn(true)} />;
+  }
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-[#1F4B3E]">Memuat...</div>;
+  }
+
+  return (
+    <div className="min-h-screen text-[#1C2A22]">
+      <header className="bg-[#1F4B3E] text-[#F1F4EC] px-4 py-3 flex items-center justify-between sticky top-0 z-20 shadow-md">
+        <div className="flex items-center gap-2 font-bold text-lg">🏪 Kasir Warung</div>
+        <nav className="flex gap-1 bg-[#183D33] rounded-lg p-1">
+          <TabBtn active={tab === "kasir"} onClick={() => setTab("kasir")} label="🛒 Kasir" />
+          <TabBtn active={tab === "produk"} onClick={() => setTab("produk")} label="📦 Produk" />
+          <TabBtn active={tab === "laporan"} onClick={() => setTab("laporan")} label="📊 Laporan" />
+        </nav>
+        <button onClick={logout} className="text-sm text-[#F1F4EC]/70 hover:text-[#F1F4EC] ml-2">Keluar</button>
+      </header>
+
+      {toast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 bg-[#1C2A22] text-white text-sm px-4 py-2 rounded-full shadow-lg">
+          ✓ {toast}
+        </div>
+      )}
+
+      <main className="p-4 max-w-6xl mx-auto">
+        {tab === "kasir" && (
+          <Kasir {...{ category, setCategory, search, setSearch, products: filteredProducts, allProducts: products, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }} />
+        )}
+        {tab === "produk" && (
+          <Produk {...{ products, addProduct, updateProduct, deleteProduct }} />
+        )}
+        {tab === "laporan" && (
+          <Laporan {...{ transactions, reportRange, setReportRange, deleteTransaction }} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, label }) {
+  return (
+    <button onClick={onClick} className={"px-3 py-1.5 rounded-md text-sm font-medium " + (active ? "bg-[#E3A23D] text-[#1C2A22]" : "text-[#F1F4EC]/80 hover:bg-[#1F4B3E]/60")}>
+      {label}
+    </button>
+  );
+}
+
+function Kasir({ category, setCategory, search, setSearch, products, allProducts, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
+      <div>
+        <div className="relative mb-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Ketik nama produk..."
+            className="w-full border border-[#D9D4C0] rounded-lg px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#E3A23D]"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7A70] text-sm">✕</button>
+          )}
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+          {CATEGORIES.map((c) => (
+            <button key={c} onClick={() => setCategory(c)}
+              className={"whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-medium border " + (category === c ? "bg-[#1F4B3E] text-white border-[#1F4B3E]" : "bg-white border-[#D9D4C0]")}>
+              {(CAT_ICON[c] || "") + " " + c}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {products.map((p) => {
+            const habis = (p.stock ?? 0) <= 0;
+            return (
+              <button
+                key={p.id}
+                onClick={() => addToCart(p)}
+                disabled={habis}
+                className={"text-left bg-white border rounded-lg p-3 transition-all " +
+                  (habis
+                    ? "opacity-40 cursor-not-allowed border-[#D9D4C0]"
+                    : "border-[#D9D4C0] hover:border-[#E3A23D] hover:shadow-md active:scale-95")}
+              >
+                <div className="text-xs text-[#6B7A70] mb-1">{CAT_ICON[p.category]} {p.category}</div>
+                <div className="font-semibold text-sm mb-2">{p.name}</div>
+                <div className="font-mono font-bold text-[#1F4B3E]">{rupiah(p.price)}</div>
+                <div className={"text-xs mt-1 " + (habis ? "text-[#7A2E3B] font-semibold" : "text-[#6B7A70]")}>
+                  {habis ? "Stok habis" : `Stok: ${p.stock ?? 0}`}
+                </div>
+              </button>
+            );
+          })}
+          {products.length === 0 && (
+            <p className="text-[#6B7A70] col-span-full py-8 text-center">
+              {search ? `Produk "${search}" tidak ditemukan.` : "Belum ada produk."}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#D9D4C0] rounded-lg p-4 h-fit lg:sticky lg:top-20">
+        <div className="font-bold mb-3">🧾 Keranjang</div>
+        {cart.length === 0 ? (
+          <p className="text-sm text-[#6B7A70] py-6 text-center">Belum ada item.</p>
+        ) : (
+          <div className="space-y-3 mb-4">
+            {cart.map((i) => {
+              const produk = allProducts.find((p) => p.id === i.id);
+              const maxTercapai = produk && i.qty >= produk.stock;
+              return (
+                <div key={i.id} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{i.name}</div>
+                    <div className="text-xs font-mono text-[#6B7A70]">{rupiah(i.price)} × {i.qty}</div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => changeQty(i.id, -1)} className="w-6 h-6 rounded bg-[#F1F4EC]">−</button>
+                    <span className="w-5 text-center text-sm font-mono">{i.qty}</span>
+                    <button
+                      onClick={() => changeQty(i.id, 1)}
+                      disabled={maxTercapai}
+                      className={"w-6 h-6 rounded bg-[#F1F4EC]" + (maxTercapai ? " opacity-40 cursor-not-allowed" : "")}
+                    >+</button>
+                    <button onClick={() => removeFromCart(i.id)} className="w-6 h-6 rounded text-[#7A2E3B] ml-1">🗑</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="border-t border-[#D9D4C0] pt-3 flex items-center justify-between mb-3">
+          <span className="font-semibold">Total</span>
+          <span className="font-mono font-bold text-lg text-[#1F4B3E]">{rupiah(cartTotal)}</span>
+        </div>
+        <button onClick={checkout} disabled={cart.length === 0} className="w-full bg-[#E3A23D] font-bold py-2.5 rounded-lg disabled:opacity-40">
+          Selesaikan Transaksi
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Produk({ products, addProduct, updateProduct, deleteProduct }) {
+  const [form, setForm] = useState({ name: "", category: "Snack", price: "", stock: "" });
+  const [editingId, setEditingId] = useState(null);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.price) return;
+    const data = { name: form.name.trim(), category: form.category, price: Number(form.price), stock: Number(form.stock) || 0 };
+    if (editingId) { updateProduct(editingId, data); setEditingId(null); }
+    else addProduct(data);
+    setForm({ name: "", category: "Snack", price: "", stock: "" });
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-4">
+      <form onSubmit={submit} className="bg-white border border-[#D9D4C0] rounded-lg p-4 h-fit space-y-3">
+        <div className="font-bold mb-1">{editingId ? "Edit Produk" : "➕ Tambah Produk"}</div>
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nama produk" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm" />
+        <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm">
+          {CATEGORIES.filter((c) => c !== "Semua").map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Harga" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+        <input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="Stok" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+        <button type="submit" className="w-full bg-[#1F4B3E] text-white font-semibold py-2 rounded-md">{editingId ? "Simpan" : "Tambah"}</button>
+      </form>
+
+      <div className="bg-white border border-[#D9D4C0] rounded-lg divide-y divide-[#EDEAE0]">
+        {products.map((p) => (
+          <div key={p.id} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-xs text-[#6B7A70]">{CAT_ICON[p.category]} {p.category}</div>
+              <div className="font-medium text-sm">{p.name}</div>
+              <div className="font-mono text-sm text-[#1F4B3E] font-semibold">{rupiah(p.price)}</div>
+              <div className={"text-xs " + ((p.stock ?? 0) <= 0 ? "text-[#7A2E3B] font-semibold" : "text-[#6B7A70]")}>
+                Stok: {p.stock ?? 0}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price), stock: String(p.stock ?? 0) }); }} className="text-xs px-2 py-1 rounded border border-[#D9D4C0]">Edit</button>
+              <button onClick={() => deleteProduct(p.id)} className="text-xs px-2 py-1 rounded border border-[#7A2E3B]/30 text-[#7A2E3B]">Hapus</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Laporan({ transactions, reportRange, setReportRange, deleteTransaction }) {
+  const filtered = useMemo(() => {
+    const now = new Date();
+    return transactions.filter((t) => {
+      const d = new Date(t.timestamp);
+      const selisihHari = (now - d) / 86400000;
+
+      if (reportRange === "hari") return d.toDateString() === now.toDateString();
+
+      if (reportRange === "kemarin") {
+        const kemarin = new Date(now);
+        kemarin.setDate(kemarin.getDate() - 1);
+        return d.toDateString() === kemarin.toDateString();
+      }
+
+      if (reportRange === "7hari") return selisihHari <= 7;
+
+      if (reportRange === "7hari_lalu") return selisihHari > 7 && selisihHari <= 14;
+
+      if (reportRange === "bulan") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+
+      if (reportRange === "bulan_lalu") {
+        const bulanLalu = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return d.getMonth() === bulanLalu.getMonth() && d.getFullYear() === bulanLalu.getFullYear();
+      }
+
+      return true;
+    });
+  }, [transactions, reportRange]);
+
+  const totalPendapatan = filtered.reduce((s, t) => s + t.total, 0);
+  const jumlahTransaksi = filtered.length;
+
+  const chartData = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString("id-ID", { weekday: "short" });
+      const total = transactions.filter((t) => t.timestamp.slice(0, 10) === key).reduce((s, t) => s + t.total, 0);
+      days.push({ label, total });
+    }
+    const max = Math.max(...days.map((d) => d.total), 1);
+    return days.map((d) => ({ ...d, pct: (d.total / max) * 100 }));
+  }, [transactions]);
+
+  const produkTerlaris = useMemo(() => {
+    const map = {};
+    filtered.forEach((t) => t.items.forEach((i) => { map[i.name] = (map[i.name] || 0) + i.qty; }));
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [filtered]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap">
+        {[
+          ["hari", "Hari Ini"],
+          ["kemarin", "Kemarin"],
+          ["7hari", "7 Hari"],
+          ["7hari_lalu", "7 Hari Sebelumnya"],
+          ["bulan", "Bulan Ini"],
+          ["bulan_lalu", "Bulan Sebelumnya"],
+          ["semua", "Semua"],
+        ].map(([v, l]) => (
+          <button key={v} onClick={() => setReportRange(v)} className={"px-3 py-1.5 rounded-full text-sm font-medium border " + (reportRange === v ? "bg-[#1F4B3E] text-white border-[#1F4B3E]" : "bg-white border-[#D9D4C0]")}>{l}</button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="bg-white border border-[#D9D4C0] rounded-lg p-4">
+          <div className="text-xs text-[#6B7A70]">Total Pendapatan</div>
+          <div className="font-mono font-bold text-xl text-[#1F4B3E]">{rupiah(totalPendapatan)}</div>
+        </div>
+        <div className="bg-white border border-[#D9D4C0] rounded-lg p-4">
+          <div className="text-xs text-[#6B7A70]">Jumlah Transaksi</div>
+          <div className="font-mono font-bold text-xl text-[#1F4B3E]">{jumlahTransaksi}</div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#D9D4C0] rounded-lg p-4">
+        <div className="font-semibold mb-3 text-sm">Pendapatan 7 Hari Terakhir</div>
+        <div className="flex items-end gap-3 h-32">
+          {chartData.map((d) => (
+            <div key={d.label} className="flex-1 flex flex-col items-center justify-end gap-1">
+              <div className="w-full bg-[#1F4B3E] rounded-t" style={{ height: d.pct + "%" }}></div>
+              <span className="text-xs text-[#6B7A70]">{d.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white border border-[#D9D4C0] rounded-lg p-4">
+          <div className="font-semibold mb-3 text-sm">Produk Terlaris</div>
+          {produkTerlaris.map(([name, qty], i) => (
+            <div key={name} className="flex justify-between text-sm py-1">
+              <span>{i + 1}. {name}</span><span className="font-mono font-semibold">{qty}x</span>
+            </div>
+          ))}
+          {produkTerlaris.length === 0 && <p className="text-sm text-[#6B7A70]">Belum ada data.</p>}
+        </div>
+
+        <div className="bg-white border border-[#D9D4C0] rounded-lg p-4 max-h-72 overflow-y-auto">
+          <div className="font-semibold mb-3 text-sm">Riwayat Transaksi</div>
+          {filtered.map((t) => (
+            <div key={t.id} className="flex items-center justify-between border-b border-[#EDEAE0] pb-2 mb-2 text-sm">
+              <div>
+                <div className="text-xs text-[#6B7A70]">{new Date(t.timestamp).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                <div>{t.items.length} item</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-semibold">{rupiah(t.total)}</span>
+                <button onClick={() => deleteTransaction(t.id)} className="text-[#7A2E3B]">🗑</button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && <p className="text-sm text-[#6B7A70]">Belum ada transaksi.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+  </html>
+  
