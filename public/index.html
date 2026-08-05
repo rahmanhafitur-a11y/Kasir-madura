@@ -45,7 +45,14 @@ async function api(path, options) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (!res.ok) throw new Error("Request gagal");
+  if (!res.ok) {
+    let msg = "Request gagal";
+    try {
+      const err = await res.json();
+      if (err.error) msg = err.error;
+    } catch {}
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -72,22 +79,38 @@ function App() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 1800); };
 
   const addToCart = (p) => {
+    if ((p.stock ?? 0) <= 0) { showToast("Stok habis"); return; }
+    const found = cart.find((i) => i.id === p.id);
+    if (found && found.qty + 1 > p.stock) { showToast(`Stok "${p.name}" tidak cukup`); return; }
     setCart((c) => {
-      const found = c.find((i) => i.id === p.id);
-      if (found) return c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + 1 } : i));
+      const f = c.find((i) => i.id === p.id);
+      if (f) return c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + 1 } : i));
       return [...c, { id: p.id, name: p.name, price: p.price, qty: 1 }];
     });
   };
-  const changeQty = (id, d) => setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: i.qty + d } : i)).filter((i) => i.qty > 0));
+  const changeQty = (id, d) => {
+    if (d > 0) {
+      const product = products.find((p) => p.id === id);
+      const item = cart.find((i) => i.id === id);
+      if (product && item && item.qty + d > product.stock) { showToast(`Stok "${product.name}" tidak cukup`); return; }
+    }
+    setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: i.qty + d } : i)).filter((i) => i.qty > 0));
+  };
   const removeFromCart = (id) => setCart((c) => c.filter((i) => i.id !== id));
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
   const checkout = async () => {
     if (cart.length === 0) return;
-    const trx = await api("/transactions", { method: "POST", body: JSON.stringify({ items: cart, total: cartTotal }) });
-    setTransactions((t) => [trx, ...t]);
-    setCart([]);
-    showToast("Transaksi tersimpan ✓");
+    try {
+      const trx = await api("/transactions", { method: "POST", body: JSON.stringify({ items: cart, total: cartTotal }) });
+      setTransactions((t) => [trx, ...t]);
+      setCart([]);
+      await loadAll(); // refresh stok produk terbaru dari server
+      showToast("Transaksi tersimpan ✓");
+    } catch (err) {
+      showToast(err.message || "Gagal checkout");
+      await loadAll();
+    }
   };
 
   const addProduct = async (data) => {
@@ -108,7 +131,8 @@ function App() {
   const deleteTransaction = async (id) => {
     await api("/transactions/" + id, { method: "DELETE" });
     setTransactions((prev) => prev.filter((t) => t.id !== id));
-    showToast("Transaksi dihapus");
+    await loadAll(); // stok yang dikembalikan server ikut ter-refresh
+    showToast("Transaksi dihapus, stok dikembalikan");
   };
 
   const filteredProducts = useMemo(() => {
@@ -143,7 +167,7 @@ function App() {
 
       <main className="p-4 max-w-6xl mx-auto">
         {tab === "kasir" && (
-          <Kasir {...{ category, setCategory, search, setSearch, products: filteredProducts, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }} />
+          <Kasir {...{ category, setCategory, search, setSearch, products: filteredProducts, allProducts: products, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }} />
         )}
         {tab === "produk" && (
           <Produk {...{ products, addProduct, updateProduct, deleteProduct }} />
@@ -164,7 +188,7 @@ function TabBtn({ active, onClick, label }) {
   );
 }
 
-function Kasir({ category, setCategory, search, setSearch, products, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }) {
+function Kasir({ category, setCategory, search, setSearch, products, allProducts, addToCart, cart, changeQty, removeFromCart, cartTotal, checkout }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
       <div>
@@ -188,13 +212,27 @@ function Kasir({ category, setCategory, search, setSearch, products, addToCart, 
           ))}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {products.map((p) => (
-            <button key={p.id} onClick={() => addToCart(p)} className="text-left bg-white border border-[#D9D4C0] rounded-lg p-3 hover:border-[#E3A23D] hover:shadow-md active:scale-95 transition-all">
-              <div className="text-xs text-[#6B7A70] mb-1">{CAT_ICON[p.category]} {p.category}</div>
-              <div className="font-semibold text-sm mb-2">{p.name}</div>
-              <div className="font-mono font-bold text-[#1F4B3E]">{rupiah(p.price)}</div>
-            </button>
-          ))}
+          {products.map((p) => {
+            const habis = (p.stock ?? 0) <= 0;
+            return (
+              <button
+                key={p.id}
+                onClick={() => addToCart(p)}
+                disabled={habis}
+                className={"text-left bg-white border rounded-lg p-3 transition-all " +
+                  (habis
+                    ? "opacity-40 cursor-not-allowed border-[#D9D4C0]"
+                    : "border-[#D9D4C0] hover:border-[#E3A23D] hover:shadow-md active:scale-95")}
+              >
+                <div className="text-xs text-[#6B7A70] mb-1">{CAT_ICON[p.category]} {p.category}</div>
+                <div className="font-semibold text-sm mb-2">{p.name}</div>
+                <div className="font-mono font-bold text-[#1F4B3E]">{rupiah(p.price)}</div>
+                <div className={"text-xs mt-1 " + (habis ? "text-[#7A2E3B] font-semibold" : "text-[#6B7A70]")}>
+                  {habis ? "Stok habis" : `Stok: ${p.stock ?? 0}`}
+                </div>
+              </button>
+            );
+          })}
           {products.length === 0 && (
             <p className="text-[#6B7A70] col-span-full py-8 text-center">
               {search ? `Produk "${search}" tidak ditemukan.` : "Belum ada produk."}
@@ -209,20 +247,28 @@ function Kasir({ category, setCategory, search, setSearch, products, addToCart, 
           <p className="text-sm text-[#6B7A70] py-6 text-center">Belum ada item.</p>
         ) : (
           <div className="space-y-3 mb-4">
-            {cart.map((i) => (
-              <div key={i.id} className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{i.name}</div>
-                  <div className="text-xs font-mono text-[#6B7A70]">{rupiah(i.price)} × {i.qty}</div>
+            {cart.map((i) => {
+              const produk = allProducts.find((p) => p.id === i.id);
+              const maxTercapai = produk && i.qty >= produk.stock;
+              return (
+                <div key={i.id} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{i.name}</div>
+                    <div className="text-xs font-mono text-[#6B7A70]">{rupiah(i.price)} × {i.qty}</div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => changeQty(i.id, -1)} className="w-6 h-6 rounded bg-[#F1F4EC]">−</button>
+                    <span className="w-5 text-center text-sm font-mono">{i.qty}</span>
+                    <button
+                      onClick={() => changeQty(i.id, 1)}
+                      disabled={maxTercapai}
+                      className={"w-6 h-6 rounded bg-[#F1F4EC]" + (maxTercapai ? " opacity-40 cursor-not-allowed" : "")}
+                    >+</button>
+                    <button onClick={() => removeFromCart(i.id)} className="w-6 h-6 rounded text-[#7A2E3B] ml-1">🗑</button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => changeQty(i.id, -1)} className="w-6 h-6 rounded bg-[#F1F4EC]">−</button>
-                  <span className="w-5 text-center text-sm font-mono">{i.qty}</span>
-                  <button onClick={() => changeQty(i.id, 1)} className="w-6 h-6 rounded bg-[#F1F4EC]">+</button>
-                  <button onClick={() => removeFromCart(i.id)} className="w-6 h-6 rounded text-[#7A2E3B] ml-1">🗑</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <div className="border-t border-[#D9D4C0] pt-3 flex items-center justify-between mb-3">
@@ -238,16 +284,16 @@ function Kasir({ category, setCategory, search, setSearch, products, addToCart, 
 }
 
 function Produk({ products, addProduct, updateProduct, deleteProduct }) {
-  const [form, setForm] = useState({ name: "", category: "Snack", price: "" });
+  const [form, setForm] = useState({ name: "", category: "Snack", price: "", stock: "" });
   const [editingId, setEditingId] = useState(null);
 
   const submit = (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.price) return;
-    const data = { name: form.name.trim(), category: form.category, price: Number(form.price) };
+    const data = { name: form.name.trim(), category: form.category, price: Number(form.price), stock: Number(form.stock) || 0 };
     if (editingId) { updateProduct(editingId, data); setEditingId(null); }
     else addProduct(data);
-    setForm({ name: "", category: "Snack", price: "" });
+    setForm({ name: "", category: "Snack", price: "", stock: "" });
   };
 
   return (
@@ -259,6 +305,7 @@ function Produk({ products, addProduct, updateProduct, deleteProduct }) {
           {CATEGORIES.filter((c) => c !== "Semua").map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Harga" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+        <input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="Stok" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
         <button type="submit" className="w-full bg-[#1F4B3E] text-white font-semibold py-2 rounded-md">{editingId ? "Simpan" : "Tambah"}</button>
       </form>
 
@@ -269,9 +316,12 @@ function Produk({ products, addProduct, updateProduct, deleteProduct }) {
               <div className="text-xs text-[#6B7A70]">{CAT_ICON[p.category]} {p.category}</div>
               <div className="font-medium text-sm">{p.name}</div>
               <div className="font-mono text-sm text-[#1F4B3E] font-semibold">{rupiah(p.price)}</div>
+              <div className={"text-xs " + ((p.stock ?? 0) <= 0 ? "text-[#7A2E3B] font-semibold" : "text-[#6B7A70]")}>
+                Stok: {p.stock ?? 0}
+              </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price) }); }} className="text-xs px-2 py-1 rounded border border-[#D9D4C0]">Edit</button>
+              <button onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price), stock: String(p.stock ?? 0) }); }} className="text-xs px-2 py-1 rounded border border-[#D9D4C0]">Edit</button>
               <button onClick={() => deleteProduct(p.id)} className="text-xs px-2 py-1 rounded border border-[#7A2E3B]/30 text-[#7A2E3B]">Hapus</button>
             </div>
           </div>
@@ -286,9 +336,27 @@ function Laporan({ transactions, reportRange, setReportRange, deleteTransaction 
     const now = new Date();
     return transactions.filter((t) => {
       const d = new Date(t.timestamp);
+      const selisihHari = (now - d) / 86400000;
+
       if (reportRange === "hari") return d.toDateString() === now.toDateString();
-      if (reportRange === "7hari") return (now - d) / 86400000 <= 7;
+
+      if (reportRange === "kemarin") {
+        const kemarin = new Date(now);
+        kemarin.setDate(kemarin.getDate() - 1);
+        return d.toDateString() === kemarin.toDateString();
+      }
+
+      if (reportRange === "7hari") return selisihHari <= 7;
+
+      if (reportRange === "7hari_lalu") return selisihHari > 7 && selisihHari <= 14;
+
       if (reportRange === "bulan") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+
+      if (reportRange === "bulan_lalu") {
+        const bulanLalu = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return d.getMonth() === bulanLalu.getMonth() && d.getFullYear() === bulanLalu.getFullYear();
+      }
+
       return true;
     });
   }, [transactions, reportRange]);
@@ -318,7 +386,15 @@ function Laporan({ transactions, reportRange, setReportRange, deleteTransaction 
   return (
     <div className="space-y-4">
       <div className="flex gap-2 flex-wrap">
-        {[["hari", "Hari Ini"], ["7hari", "7 Hari"], ["bulan", "Bulan Ini"], ["semua", "Semua"]].map(([v, l]) => (
+        {[
+          ["hari", "Hari Ini"],
+          ["kemarin", "Kemarin"],
+          ["7hari", "7 Hari"],
+          ["7hari_lalu", "7 Hari Sebelumnya"],
+          ["bulan", "Bulan Ini"],
+          ["bulan_lalu", "Bulan Sebelumnya"],
+          ["semua", "Semua"],
+        ].map(([v, l]) => (
           <button key={v} onClick={() => setReportRange(v)} className={"px-3 py-1.5 rounded-full text-sm font-medium border " + (reportRange === v ? "bg-[#1F4B3E] text-white border-[#1F4B3E]" : "bg-white border-[#D9D4C0]")}>{l}</button>
         ))}
       </div>
