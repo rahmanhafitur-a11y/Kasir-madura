@@ -409,17 +409,23 @@ function Kasir({ category, setCategory, search, setSearch, products, allProducts
 }
 
 function Produk({ products, addProduct, updateProduct, deleteProduct }) {
-  const [form, setForm] = useState({ name: "", category: "Snack", price: "", stock: "" });
+  const [form, setForm] = useState({ name: "", category: "Snack", price: "", stock: "", normalStock: "" });
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
 
   const submit = (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.price) return;
-    const data = { name: form.name.trim(), category: form.category, price: Number(form.price), stock: Number(form.stock) || 0 };
+    const data = {
+      name: form.name.trim(),
+      category: form.category,
+      price: Number(form.price),
+      stock: Number(form.stock) || 0,
+      normalStock: Number(form.normalStock) || 0,
+    };
     if (editingId) { updateProduct(editingId, data); setEditingId(null); }
     else addProduct(data);
-    setForm({ name: "", category: "Snack", price: "", stock: "" });
+    setForm({ name: "", category: "Snack", price: "", stock: "", normalStock: "" });
   };
 
   const displayedProducts = useMemo(() => {
@@ -437,7 +443,11 @@ function Produk({ products, addProduct, updateProduct, deleteProduct }) {
           {CATEGORIES.filter((c) => c !== "Semua").map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Harga" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
-        <input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="Stok" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+        <input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="Stok saat ini" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+        <div>
+          <input type="number" value={form.normalStock} onChange={(e) => setForm({ ...form, normalStock: e.target.value })} placeholder="Stok wajar (target)" className="w-full border border-[#D9D4C0] rounded-md px-3 py-2 text-sm font-mono" />
+          <div className="text-xs text-[#6B7A70] mt-1">Jumlah stok normal saat baru belanja/restock.</div>
+        </div>
         <button type="submit" className="w-full bg-[#1F4B3E] text-white font-semibold py-2 rounded-md">{editingId ? "Simpan" : "Tambah"}</button>
       </form>
 
@@ -460,11 +470,16 @@ function Produk({ products, addProduct, updateProduct, deleteProduct }) {
               <div className="font-medium text-sm">{p.name}</div>
               <div className="font-mono text-sm text-[#1F4B3E] font-semibold">{rupiah(p.price)}</div>
               <div className={"text-xs " + ((p.stock ?? 0) <= 0 ? "text-[#7A2E3B] font-semibold" : "text-[#6B7A70]")}>
-                Stok: {p.stock ?? 0}
+                Stok: {p.stock ?? 0} {(p.normalStock ?? 0) > 0 && <span className="text-[#6B7A70]">/ wajar {p.normalStock}</span>}
               </div>
+              {(p.normalStock ?? 0) > (p.stock ?? 0) && (
+                <div className="text-xs text-[#B4692B] font-semibold mt-0.5">
+                  🛒 Perlu beli {p.normalStock - (p.stock ?? 0)}
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price), stock: String(p.stock ?? 0) }); }} className="text-xs px-2 py-1 rounded border border-[#D9D4C0]">Edit</button>
+              <button onClick={() => { setEditingId(p.id); setForm({ name: p.name, category: p.category, price: String(p.price), stock: String(p.stock ?? 0), normalStock: String(p.normalStock ?? 0) }); }} className="text-xs px-2 py-1 rounded border border-[#D9D4C0]">Edit</button>
               <button onClick={() => deleteProduct(p.id)} className="text-xs px-2 py-1 rounded border border-[#7A2E3B]/30 text-[#7A2E3B]">Hapus</button>
             </div>
           </div>
