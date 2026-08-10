@@ -52,21 +52,21 @@ app.post("/api/logout", (req, res) => {
 });
 
 const DEFAULT_PRODUCTS = [
-  { id: "p1", name: "Sampoerna Mild", category: "Rokok", price: 30000, stock: 20 },
-  { id: "p2", name: "Gudang Garam Filter", category: "Rokok", price: 25000, stock: 20 },
-  { id: "p3", name: "Djarum Super", category: "Rokok", price: 27000, stock: 20 },
-  { id: "p4", name: "Air Mineral 600ml", category: "Minuman", price: 4000, stock: 30 },
-  { id: "p5", name: "Teh Botol", category: "Minuman", price: 5000, stock: 30 },
-  { id: "p6", name: "Kopi Sachet", category: "Minuman", price: 2000, stock: 30 },
-  { id: "p7", name: "Indomie Goreng", category: "Snack", price: 3500, stock: 30 },
-  { id: "p8", name: "Chitato", category: "Snack", price: 11000, stock: 20 },
-  { id: "p9", name: "Beras 1kg", category: "Sembako", price: 14000, stock: 15 },
-  { id: "p10", name: "Minyak Goreng 1L", category: "Sembako", price: 18000, stock: 15 },
-  { id: "p11", name: "Telur 1kg", category: "Sembako", price: 28000, stock: 15 },
-  { id: "p12", name: "Gula 1kg", category: "Sembako", price: 16000, stock: 15 },
-  { id: "p13", name: "Pulsa 10rb", category: "Pulsa/Token", price: 11000, stock: 50 },
-  { id: "p14", name: "Token Listrik 20rb", category: "Pulsa/Token", price: 21000, stock: 50 },
-  { id: "p15", name: "Gas LPG 3kg", category: "Lainnya", price: 22000, stock: 10 },
+  { id: "p1", name: "Sampoerna Mild", category: "Rokok", price: 30000, stock: 20, normalStock: 20 },
+  { id: "p2", name: "Gudang Garam Filter", category: "Rokok", price: 25000, stock: 20, normalStock: 20 },
+  { id: "p3", name: "Djarum Super", category: "Rokok", price: 27000, stock: 20, normalStock: 20 },
+  { id: "p4", name: "Air Mineral 600ml", category: "Minuman", price: 4000, stock: 30, normalStock: 30 },
+  { id: "p5", name: "Teh Botol", category: "Minuman", price: 5000, stock: 30, normalStock: 30 },
+  { id: "p6", name: "Kopi Sachet", category: "Minuman", price: 2000, stock: 30, normalStock: 30 },
+  { id: "p7", name: "Indomie Goreng", category: "Snack", price: 3500, stock: 30, normalStock: 30 },
+  { id: "p8", name: "Chitato", category: "Snack", price: 11000, stock: 20, normalStock: 20 },
+  { id: "p9", name: "Beras 1kg", category: "Sembako", price: 14000, stock: 15, normalStock: 15 },
+  { id: "p10", name: "Minyak Goreng 1L", category: "Sembako", price: 18000, stock: 15, normalStock: 15 },
+  { id: "p11", name: "Telur 1kg", category: "Sembako", price: 28000, stock: 15, normalStock: 15 },
+  { id: "p12", name: "Gula 1kg", category: "Sembako", price: 16000, stock: 15, normalStock: 15 },
+  { id: "p13", name: "Pulsa 10rb", category: "Pulsa/Token", price: 11000, stock: 50, normalStock: 50 },
+  { id: "p14", name: "Token Listrik 20rb", category: "Pulsa/Token", price: 21000, stock: 50, normalStock: 50 },
+  { id: "p15", name: "Gas LPG 3kg", category: "Lainnya", price: 22000, stock: 10, normalStock: 10 },
 ];
 
 // ---- baca / tulis data.json (ini "gudang penyimpanan" datanya) ----
@@ -94,7 +94,7 @@ app.get("/api/data", requireLogin, async (req, res) => {
 // ---- produk: tambah ----
 app.post("/api/products", requireLogin, async (req, res) => {
   const data = await readData();
-  const newProduct = { id: `p_${Date.now()}`, stock: 0, ...req.body };
+  const newProduct = { id: `p_${Date.now()}`, stock: 0, normalStock: 0, ...req.body };
   data.products.push(newProduct);
   await writeData(data);
   res.json(newProduct);
