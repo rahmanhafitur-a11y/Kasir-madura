@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "express-session": "^1.18.0"
+    "express-session": "^1.18.0",
+    "@supabase/supabase-js": "^2.45.4"
   }
 }
