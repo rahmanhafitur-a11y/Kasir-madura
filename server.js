@@ -1,11 +1,13 @@
 import express from "express";
 import session from "express-session";
-import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, "data.json");
+
+// ---- koneksi ke database Supabase (data tersimpan permanen di sini) ----
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 // ---- kredensial login (bisa diganti lewat Environment Variables di Railway) ----
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
@@ -13,7 +15,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "warung123";
 const SESSION_SECRET = process.env.SESSION_SECRET || "ganti-secret-ini-lewat-railway";
 
 const app = express();
-app.set("trust proxy", 1); // perlu karena Railway jalan di belakang proxy
+app.set("trust proxy", 1); // perlu karena hosting jalan di belakang proxy
 app.use(express.json());
 app.use(
   session({
@@ -69,57 +71,80 @@ const DEFAULT_PRODUCTS = [
   { id: "p15", name: "Gas LPG 3kg", category: "Lainnya", price: 22000, stock: 10, normalStock: 10 },
 ];
 
-// ---- baca / tulis data.json (ini "gudang penyimpanan" datanya) ----
+// ---- baca / tulis data dari Supabase (gudang penyimpanan datanya, permanen) ----
 async function readData() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
+  const { data, error } = await supabase.from("app_data").select("data").eq("id", 1).single();
+
+  // PGRST116 = baris memang belum pernah ada sama sekali (baru pertama kali dipakai)
+  // Selain kode itu, JANGAN dianggap kosong -- kalau dipaksa reset, data lama bisa hilang
+  // hanya gara-gara gangguan koneksi sesaat ke Supabase.
+  if (error && error.code === "PGRST116") {
     const initial = { products: DEFAULT_PRODUCTS, transactions: [] };
     await writeData(initial);
     return initial;
   }
+
+  if (error) {
+    console.error("Gagal membaca data dari Supabase:", error.message);
+    throw new Error("Gagal terhubung ke database, coba lagi sebentar");
+  }
+
+  return data.data;
 }
 
 async function writeData(data) {
-  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
+  const { error } = await supabase.from("app_data").upsert({ id: 1, data });
+  if (error) {
+    console.error("Gagal menyimpan data ke Supabase:", error.message);
+    throw new Error("Gagal menyimpan data ke database");
+  }
+}
+
+// ---- bungkus tiap route supaya error nggak bikin request nyangkut tanpa respons ----
+function asyncHandler(fn) {
+  return (req, res) => {
+    fn(req, res).catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: err.message || "Terjadi kesalahan di server" });
+    });
+  };
 }
 
 // ---- ambil semua data (produk + riwayat transaksi) ----
-app.get("/api/data", requireLogin, async (req, res) => {
+app.get("/api/data", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   res.json(data);
-});
+}));
 
 // ---- produk: tambah ----
-app.post("/api/products", requireLogin, async (req, res) => {
+app.post("/api/products", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   const newProduct = { id: `p_${Date.now()}`, stock: 0, normalStock: 0, ...req.body };
   data.products.push(newProduct);
   await writeData(data);
   res.json(newProduct);
-});
+}));
 
 // ---- produk: ubah ----
-app.put("/api/products/:id", requireLogin, async (req, res) => {
+app.put("/api/products/:id", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   data.products = data.products.map((p) =>
     p.id === req.params.id ? { ...p, ...req.body } : p
   );
   await writeData(data);
   res.json({ ok: true });
-});
+}));
 
 // ---- produk: hapus ----
-app.delete("/api/products/:id", requireLogin, async (req, res) => {
+app.delete("/api/products/:id", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   data.products = data.products.filter((p) => p.id !== req.params.id);
   await writeData(data);
   res.json({ ok: true });
-});
+}));
 
 // ---- transaksi: checkout (simpan penjualan baru) ----
-app.post("/api/transactions", requireLogin, async (req, res) => {
+app.post("/api/transactions", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   const items = req.body.items || [];
 
@@ -147,10 +172,10 @@ app.post("/api/transactions", requireLogin, async (req, res) => {
   data.transactions.unshift(trx);
   await writeData(data);
   res.json(trx);
-});
+}));
 
 // ---- transaksi: hapus (untuk koreksi kesalahan input) ----
-app.delete("/api/transactions/:id", requireLogin, async (req, res) => {
+app.delete("/api/transactions/:id", requireLogin, asyncHandler(async (req, res) => {
   const data = await readData();
   const trx = data.transactions.find((t) => t.id === req.params.id);
 
@@ -165,7 +190,7 @@ app.delete("/api/transactions/:id", requireLogin, async (req, res) => {
   data.transactions = data.transactions.filter((t) => t.id !== req.params.id);
   await writeData(data);
   res.json({ ok: true });
-});
+}));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
